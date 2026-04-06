@@ -49,7 +49,7 @@ export function LoginForm({ onLogin, error }: LoginFormProps) {
             Gestão para ordens de serviços
           </CardTitle>
           <CardDescription className="text-base">
-            Entre com suas credenciais para acessar o sistema
+            Entre com suas credenciais para acessar o sistema.
           </CardDescription>
         </CardHeader>
 
