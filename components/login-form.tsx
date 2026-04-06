@@ -27,7 +27,7 @@ export function LoginForm({ onLogin, error }: LoginFormProps) {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100 p-4">
+    <div className="min-h-screen flex items-center justify-center bg-linear-to-br from-slate-50 to-slate-100 p-4">
       <Card className="w-full max-w-md shadow-lg">
         <CardHeader className="space-y-3 text-center">
           
@@ -41,7 +41,7 @@ export function LoginForm({ onLogin, error }: LoginFormProps) {
           </div>
 
           <CardTitle className="text-2xl font-bold">
-            Gestão para ordens de serviços
+            Gestão para ordens de serviços.
           </CardTitle>
           <CardDescription className="text-base">
             Entre com suas credenciais para acessar o sistema
