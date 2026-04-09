@@ -14,29 +14,30 @@ import {
 } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Info } from "lucide-react";
 import { isDemoMode } from "@/lib/auth";
 
 interface LoginFormProps {
-  onLogin: (email: string, password: string) => void;
+  onLogin: (email: string, password: string) => Promise<void>;
   error?: string;
 }
 
 export function LoginForm({ onLogin, error }: LoginFormProps) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
   const showDemoCredentials = isDemoMode();
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    onLogin(email, password);
+    setIsLoading(true);
+    await onLogin(email, password);
+    setIsLoading(false);
   };
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-linear-to-br from-slate-50 to-slate-100 p-4">
       <Card className="w-full max-w-md shadow-lg">
         <CardHeader className="space-y-3 text-center">
-          {/* LOGO SEM FUNDO E COM BORDER RADIUS */}
           <div className="mx-auto w-25 h-25 flex items-center justify-center">
             <img
               src="/Logo.png"
@@ -90,45 +91,14 @@ export function LoginForm({ onLogin, error }: LoginFormProps) {
             <Button
               type="submit"
               className="w-full h-11 bg-orange-500 hover:bg-orange-600"
+              disabled={isLoading}
             >
-              Entrar
+              {isLoading ? "Entrando..." : "Entrar"}
             </Button>
 
-            {showDemoCredentials && (
-              <div className="pt-4 border-t">
-                <div className="flex items-center gap-2 mb-3">
-                  <Info className="w-4 h-4 text-blue-500" />
-                  <p className="text-sm font-medium text-blue-700">
-                    Modo Demonstração
-                  </p>
-                </div>
-
-                <div className="space-y-2 text-xs bg-blue-50 p-3 rounded-lg border border-blue-200">
-                  <div>
-                    <p className="font-semibold text-slate-700">
-                      Administrador:
-                    </p>
-                    <p className="text-slate-600">admin@oficina.com / 123456</p>
-                  </div>
-                  <div>
-                    <p className="font-semibold text-slate-700">Mecânico:</p>
-                    <p className="text-slate-600">
-                      mecanico@oficina.com / 123456
-                    </p>
-                  </div>
-                  <div>
-                    <p className="font-semibold text-slate-700">Atendente:</p>
-                    <p className="text-slate-600">
-                      atendente@oficina.com / 123456
-                    </p>
-                  </div>
-                  <div>
-                    <p className="font-semibold text-slate-700">SuperAdmin:</p>
-                    <p className="text-slate-600">
-                      antonello@oficina.com / 123456
-                    </p>
-                  </div>
-                </div>
+            {!showDemoCredentials && (
+              <div className="pt-4 border-t text-center text-sm text-slate-500">
+                <p>API de Produção - Contate o administrador para acesso</p>
               </div>
             )}
           </form>

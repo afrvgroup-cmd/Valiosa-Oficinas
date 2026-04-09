@@ -4,23 +4,20 @@ import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { getAuthState, logout } from "@/lib/auth"
 import {
-  getAllLicenses,
-  createLicense,
-  updateLicense,
-  deleteLicense,
-  getLicenseStats,
-  checkLicenseExpiration,
-  getExpiringLicenses,
-  initializeLicenses,
-  type License,
-} from "@/lib/licenses"
+  getAllCompanies,
+  createCompany,
+  deleteCompany,
+  updateCompany,
+  type Company,
+} from "@/lib/api-companies"
+import { createUser } from "@/lib/api-users"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Textarea } from "@/components/ui/textarea"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   Dialog,
   DialogContent,
@@ -41,20 +38,30 @@ import {
   Trash2,
   CheckCircle2,
   XCircle,
-  Sparkles,
+  Building2,
+  Pencil,
 } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
+interface LicenseStats {
+  total: number
+  active: number
+  suspended: number
+  expired: number
+  trial: number
+  revenue: number
+}
+
 export default function LicensesPage() {
-  const [licenses, setLicenses] = useState<License[]>([])
-  const [filteredLicenses, setFilteredLicenses] = useState<License[]>([])
-  const [stats, setStats] = useState<any>(null)
+  const [companies, setCompanies] = useState<Company[]>([])
+  const [filteredCompanies, setFilteredCompanies] = useState<Company[]>([])
+  const [stats, setStats] = useState<LicenseStats | null>(null)
   const [searchTerm, setSearchTerm] = useState("")
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
-  const [selectedLicense, setSelectedLicense] = useState<License | null>(null)
+  const [selectedCompany, setSelectedCompany] = useState<Company | null>(null)
   const [formData, setFormData] = useState({
-    companyName: "",
+    name: "",
     cnpj: "",
     email: "",
     phone: "",
@@ -63,36 +70,95 @@ export default function LicensesPage() {
     maxUsers: 5,
     startDate: new Date().toISOString().split("T")[0],
     expirationDate: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
-    notes: "",
+  })
+  const [userFormData, setUserFormData] = useState({
+    nome_completo: "",
+    cpf: "",
+    email: "",
+    senha: "",
+    cargo: "admin",
+  })
+  const [editFormData, setEditFormData] = useState({
+    name: "",
+    email: "",
+    phone: "",
+    plan: "",
+    status: "",
+    maxUsers: 0,
   })
   const [error, setError] = useState("")
+  const [isLoading, setIsLoading] = useState(true)
   const router = useRouter()
 
   useEffect(() => {
     const { isAuthenticated, user } = getAuthState()
+    console.log("Licenses page auth:", isAuthenticated, user?.role)
 
     if (!isAuthenticated || user?.role !== "super-admin") {
       router.push("/")
       return
     }
 
-    initializeLicenses()
     loadData()
   }, [router])
 
   useEffect(() => {
-    const filtered = licenses.filter(
-      (license) =>
-        license.companyName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        license.cnpj.includes(searchTerm) ||
-        license.email.toLowerCase().includes(searchTerm.toLowerCase()),
+    const filtered = companies.filter(
+      (company) =>
+        company.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        company.cnpj.includes(searchTerm) ||
+        (company.email && company.email.toLowerCase().includes(searchTerm.toLowerCase())),
     )
-    setFilteredLicenses(filtered)
-  }, [searchTerm, licenses])
+    setFilteredCompanies(filtered)
+  }, [searchTerm, companies])
 
-  const loadData = () => {
-    setLicenses(getAllLicenses())
-    setStats(getLicenseStats())
+  const loadData = async () => {
+    try {
+      setIsLoading(true)
+      const companiesData = await getAllCompanies()
+      setCompanies(companiesData)
+      
+      const calculatedStats = calculateStats(companiesData)
+      setStats(calculatedStats)
+      console.log("Companies loaded:", companiesData.length)
+    } catch (err) {
+      console.error("Erro ao carregar dados:", err)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const calculateStats = (companiesList: Company[]): LicenseStats => {
+    const stats: LicenseStats = {
+      total: companiesList.length,
+      active: 0,
+      suspended: 0,
+      expired: 0,
+      trial: 0,
+      revenue: 0,
+    }
+
+    const planPrices: Record<string, number> = {
+      basic: 99,
+      professional: 249,
+      enterprise: 499,
+    }
+
+    companiesList.forEach((company) => {
+      const status = company.license_status || company.status
+      const plan = company.plan || "basic"
+
+      if (status === "active") stats.active++
+      else if (status === "suspended") stats.suspended++
+      else if (status === "expired") stats.expired++
+      else if (status === "trial") stats.trial++
+
+      if (status === "active" || status === "trial") {
+        stats.revenue += planPrices[plan] || 99
+      }
+    })
+
+    return stats
   }
 
   const handleLogout = () => {
@@ -100,686 +166,495 @@ export default function LicensesPage() {
     router.push("/")
   }
 
-  const handleCreateLicense = () => {
-    if (!formData.companyName || !formData.cnpj || !formData.email) {
-      setError("Preencha todos os campos obrigatórios")
+  const handleCreateCompany = async () => {
+    if (!formData.name || !formData.cnpj) {
+      setError("Nome e CNPJ são obrigatórios")
       return
     }
 
-    const success = createLicense(formData as any)
-
-    if (success) {
-      resetForm()
+    try {
+      console.log("Creating company:", formData)
+      const companyResult = await createCompany(formData)
+      console.log("Company created:", companyResult)
+      
+      if (userFormData.nome_completo && userFormData.email && userFormData.senha) {
+        console.log("Creating admin user for company:", companyResult.id)
+        await createUser({
+          nome_completo: userFormData.nome_completo,
+          cpf: userFormData.cpf,
+          email: userFormData.email,
+          senha: userFormData.senha,
+          cargo: userFormData.cargo,
+          tenant_id: companyResult.id,
+        })
+      }
+      
+      setFormData({
+        name: "",
+        cnpj: "",
+        email: "",
+        phone: "",
+        plan: "basic",
+        status: "trial",
+        maxUsers: 5,
+        startDate: new Date().toISOString().split("T")[0],
+        expirationDate: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
+      })
+      setUserFormData({
+        nome_completo: "",
+        email: "",
+        senha: "",
+        cargo: "admin",
+      })
+      setError("")
       setIsCreateDialogOpen(false)
       loadData()
-    } else {
-      setError("CNPJ já cadastrado")
+    } catch (err: any) {
+      console.error("Error creating company:", err)
+      setError(err.message || "Erro ao criar empresa")
     }
   }
 
-  const handleEditLicense = () => {
-    if (!selectedLicense) return
-
-    const success = updateLicense(selectedLicense.id, formData as any)
-
-    if (success) {
-      resetForm()
-      setIsEditDialogOpen(false)
-      setSelectedLicense(null)
-      loadData()
-    }
-  }
-
-  const handleDeleteLicense = (id: string) => {
-    if (confirm("Tem certeza que deseja excluir esta licença?")) {
-      deleteLicense(id)
-      loadData()
-    }
-  }
-
-  const openEditDialog = (license: License) => {
-    setSelectedLicense(license)
-    setFormData({
-      companyName: license.companyName,
-      cnpj: license.cnpj,
-      email: license.email,
-      phone: license.phone,
-      plan: license.plan,
-      status: license.status,
-      maxUsers: license.maxUsers,
-      startDate: license.startDate,
-      expirationDate: license.expirationDate,
-      notes: license.notes || "",
+  const handleEditCompany = (company: Company) => {
+    setSelectedCompany(company)
+    setEditFormData({
+      name: company.name || "",
+      email: company.email || "",
+      phone: company.phone || "",
+      plan: company.plan || "basic",
+      status: company.license_status || "trial",
+      maxUsers: company.max_users || 5,
     })
     setIsEditDialogOpen(true)
   }
 
-  const resetForm = () => {
-    setFormData({
-      companyName: "",
-      cnpj: "",
-      email: "",
-      phone: "",
-      plan: "basic",
-      status: "trial",
-      maxUsers: 5,
-      startDate: new Date().toISOString().split("T")[0],
-      expirationDate: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
-      notes: "",
-    })
-    setError("")
+  const handleUpdateCompany = async () => {
+    if (!selectedCompany) return
+
+    try {
+      await updateCompany(selectedCompany.id, {
+        name: editFormData.name,
+        email: editFormData.email,
+        phone: editFormData.phone,
+      })
+      setIsEditDialogOpen(false)
+      setSelectedCompany(null)
+      loadData()
+    } catch (err: any) {
+      setError(err.message || "Erro ao atualizar empresa")
+    }
+  }
+
+  const handleDeleteCompany = async (id: string) => {
+    if (confirm("Tem certeza que deseja excluir esta empresa?")) {
+      try {
+        await deleteCompany(id)
+        loadData()
+      } catch (err) {
+        console.error("Erro ao excluir:", err)
+      }
+    }
   }
 
   const getStatusBadge = (status: string) => {
-    const variants: Record<string, { color: string; icon: any; label: string }> = {
-      active: { color: "bg-green-500", icon: CheckCircle2, label: "Ativa" },
-      suspended: { color: "bg-orange-500", icon: AlertCircle, label: "Suspensa" },
-      expired: { color: "bg-red-500", icon: XCircle, label: "Expirada" },
-      trial: { color: "bg-blue-500", icon: Sparkles, label: "Teste" },
+    const statusColors: Record<string, string> = {
+      active: "bg-green-500",
+      suspended: "bg-red-500",
+      expired: "bg-gray-500",
+      trial: "bg-yellow-500",
     }
-    const variant = variants[status] || variants.active
-    const Icon = variant.icon
-
+    const labels: Record<string, string> = {
+      active: "Ativo",
+      suspended: "Suspenso",
+      expired: "Expirado",
+      trial: "Trial",
+    }
     return (
-      <Badge className={`${variant.color} text-white gap-1`}>
-        <Icon className="w-3 h-3" />
-        {variant.label}
+      <Badge className={`${statusColors[status] || "bg-gray-500"} text-white`}>
+        {labels[status] || status}
       </Badge>
     )
   }
 
-  const getPlanLabel = (plan: string) => {
-    const labels: Record<string, string> = {
-      basic: "Básico",
-      professional: "Profissional",
-      enterprise: "Enterprise",
+  const getPlanBadge = (plan: string) => {
+    const planColors: Record<string, string> = {
+      basic: "bg-blue-500",
+      professional: "bg-purple-500",
+      enterprise: "bg-orange-500",
     }
-    return labels[plan] || plan
+    return (
+      <Badge className={`${planColors[plan] || "bg-gray-500"} text-white`}>
+        {plan}
+      </Badge>
+    )
   }
 
-  const expiringLicenses = getExpiringLicenses(30)
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-8 h-8 border-4 border-orange-500 border-t-transparent rounded-full animate-spin mx-auto" />
+          <p className="mt-4 text-slate-600">Carregando...</p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="min-h-screen bg-slate-50">
       <header className="bg-white border-b border-slate-200 sticky top-0 z-10 shadow-sm">
         <div className="container mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-600 rounded-xl flex items-center justify-center">
+            <div className="w-10 h-10 bg-orange-500 rounded-xl flex items-center justify-center">
               <CreditCard className="w-6 h-6 text-white" />
             </div>
             <div>
-              <h1 className="text-lg font-bold text-slate-900">Gestão de Licenças</h1>
-              <p className="text-xs text-slate-600">Controle de clientes SAAS</p>
+              <h1 className="text-lg font-bold text-slate-900">Licenças</h1>
+              <p className="text-xs text-slate-600">Gestão de Empresas</p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" onClick={() => router.push("/admin")}>
-              Voltar
-            </Button>
-            <Button variant="outline" size="icon" onClick={handleLogout}>
-              <LogOut className="w-4 h-4" />
-            </Button>
-          </div>
+          <Button variant="outline" size="icon" onClick={handleLogout}>
+            <LogOut className="w-4 h-4" />
+          </Button>
         </div>
       </header>
 
       <main className="container mx-auto px-4 py-6 space-y-6">
-        <Tabs defaultValue="overview" className="w-full">
-          <TabsList className="grid w-full grid-cols-3">
-            <TabsTrigger value="overview">Visão Geral</TabsTrigger>
-            <TabsTrigger value="licenses">Licenças</TabsTrigger>
-            <TabsTrigger value="alerts">Alertas</TabsTrigger>
-          </TabsList>
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Total de Empresas</CardTitle>
+              <Building2 className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{stats?.total || 0}</div>
+            </CardContent>
+          </Card>
 
-          <TabsContent value="overview" className="space-y-6 mt-6">
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Total de Licenças</CardTitle>
-                  <CreditCard className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold">{stats?.total || 0}</div>
-                  <p className="text-xs text-muted-foreground">Clientes cadastrados</p>
-                </CardContent>
-              </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Ativas</CardTitle>
+              <CheckCircle2 className="h-4 w-4 text-green-600" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-green-600">{stats?.active || 0}</div>
+            </CardContent>
+          </Card>
 
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Licenças Ativas</CardTitle>
-                  <CheckCircle2 className="h-4 w-4 text-green-600" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold text-green-600">{stats?.active || 0}</div>
-                  <p className="text-xs text-muted-foreground">{stats?.trial || 0} em período de teste</p>
-                </CardContent>
-              </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Trial</CardTitle>
+              <TrendingUp className="h-4 w-4 text-yellow-600" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-yellow-600">{stats?.trial || 0}</div>
+            </CardContent>
+          </Card>
 
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Receita Mensal</CardTitle>
-                  <TrendingUp className="h-4 w-4 text-blue-600" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold text-blue-600">
-                    R$ {stats?.revenue?.toLocaleString("pt-BR") || 0}
-                  </div>
-                  <p className="text-xs text-muted-foreground">Estimativa mensal</p>
-                </CardContent>
-              </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Suspensas</CardTitle>
+              <AlertCircle className="h-4 w-4 text-red-600" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-red-600">{stats?.suspended || 0}</div>
+            </CardContent>
+          </Card>
 
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Expirando</CardTitle>
-                  <AlertCircle className="h-4 w-4 text-orange-600" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold text-orange-600">{expiringLicenses.length}</div>
-                  <p className="text-xs text-muted-foreground">Próximos 30 dias</p>
-                </CardContent>
-              </Card>
-            </div>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Receita Mensal</CardTitle>
+              <CreditCard className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">R$ {stats?.revenue || 0}</div>
+            </CardContent>
+          </Card>
+        </div>
 
-            <div className="grid gap-6 md:grid-cols-2">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Distribuição por Status</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className="w-3 h-3 bg-green-500 rounded-full" />
-                      <span className="text-sm">Ativas</span>
-                    </div>
-                    <span className="font-bold">{stats?.active || 0}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className="w-3 h-3 bg-blue-500 rounded-full" />
-                      <span className="text-sm">Teste</span>
-                    </div>
-                    <span className="font-bold">{stats?.trial || 0}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className="w-3 h-3 bg-orange-500 rounded-full" />
-                      <span className="text-sm">Suspensas</span>
-                    </div>
-                    <span className="font-bold">{stats?.suspended || 0}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className="w-3 h-3 bg-red-500 rounded-full" />
-                      <span className="text-sm">Expiradas</span>
-                    </div>
-                    <span className="font-bold">{stats?.expired || 0}</span>
-                  </div>
-                </CardContent>
-              </Card>
+        <div className="flex items-center gap-4">
+          <div className="relative flex-1 max-w-sm">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-400" />
+            <Input
+              placeholder="Buscar por nome, CNPJ ou email..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="pl-10"
+            />
+          </div>
 
-              <Card>
-                <CardHeader>
-                  <CardTitle>Distribuição por Plano</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm">Básico</span>
-                    <span className="font-bold">{licenses.filter((l) => l.plan === "basic").length}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm">Profissional</span>
-                    <span className="font-bold">{licenses.filter((l) => l.plan === "professional").length}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm">Enterprise</span>
-                    <span className="font-bold">{licenses.filter((l) => l.plan === "enterprise").length}</span>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-          </TabsContent>
-
-          <TabsContent value="licenses" className="space-y-6 mt-6">
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between">
-                <div>
-                  <CardTitle>Gerenciar Licenças</CardTitle>
-                  <CardDescription>Controle completo dos clientes SAAS</CardDescription>
-                </div>
-                <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-                  <DialogTrigger asChild>
-                    <Button className="gap-2" onClick={resetForm}>
-                      <Plus className="w-4 h-4" />
-                      Nova Licença
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-                    <DialogHeader>
-                      <DialogTitle>Cadastrar Nova Licença</DialogTitle>
-                      <DialogDescription>Preencha os dados do novo cliente</DialogDescription>
-                    </DialogHeader>
-                    <div className="space-y-4 py-4">
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                          <Label htmlFor="companyName">Nome da Empresa *</Label>
-                          <Input
-                            id="companyName"
-                            placeholder="Oficina LTDA"
-                            value={formData.companyName}
-                            onChange={(e) => setFormData({ ...formData, companyName: e.target.value })}
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label htmlFor="cnpj">CNPJ *</Label>
-                          <Input
-                            id="cnpj"
-                            placeholder="00.000.000/0000-00"
-                            value={formData.cnpj}
-                            onChange={(e) => setFormData({ ...formData, cnpj: e.target.value })}
-                          />
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                          <Label htmlFor="email">Email *</Label>
-                          <Input
-                            id="email"
-                            type="email"
-                            placeholder="contato@empresa.com"
-                            value={formData.email}
-                            onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label htmlFor="phone">Telefone</Label>
-                          <Input
-                            id="phone"
-                            placeholder="(11) 99999-9999"
-                            value={formData.phone}
-                            onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                          />
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-3 gap-4">
-                        <div className="space-y-2">
-                          <Label htmlFor="plan">Plano</Label>
-                          <Select
-                            value={formData.plan}
-                            onValueChange={(value) => setFormData({ ...formData, plan: value })}
-                          >
-                            <SelectTrigger>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="basic">Básico (R$ 99/mês)</SelectItem>
-                              <SelectItem value="professional">Profissional (R$ 249/mês)</SelectItem>
-                              <SelectItem value="enterprise">Enterprise (R$ 499/mês)</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div className="space-y-2">
-                          <Label htmlFor="status">Status</Label>
-                          <Select
-                            value={formData.status}
-                            onValueChange={(value) => setFormData({ ...formData, status: value })}
-                          >
-                            <SelectTrigger>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="trial">Teste</SelectItem>
-                              <SelectItem value="active">Ativa</SelectItem>
-                              <SelectItem value="suspended">Suspensa</SelectItem>
-                              <SelectItem value="expired">Expirada</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div className="space-y-2">
-                          <Label htmlFor="maxUsers">Máx. Usuários</Label>
-                          <Input
-                            id="maxUsers"
-                            type="number"
-                            min="1"
-                            value={formData.maxUsers}
-                            onChange={(e) => setFormData({ ...formData, maxUsers: Number.parseInt(e.target.value) })}
-                          />
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                          <Label htmlFor="startDate">Data de Início</Label>
-                          <Input
-                            id="startDate"
-                            type="date"
-                            value={formData.startDate}
-                            onChange={(e) => setFormData({ ...formData, startDate: e.target.value })}
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label htmlFor="expirationDate">Data de Expiração</Label>
-                          <Input
-                            id="expirationDate"
-                            type="date"
-                            value={formData.expirationDate}
-                            onChange={(e) => setFormData({ ...formData, expirationDate: e.target.value })}
-                          />
-                        </div>
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="notes">Observações</Label>
-                        <Textarea
-                          id="notes"
-                          placeholder="Anotações sobre o cliente..."
-                          value={formData.notes}
-                          onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                          rows={3}
-                        />
-                      </div>
-                      {error && <p className="text-sm text-red-500">{error}</p>}
-                    </div>
-                    <DialogFooter>
-                      <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
-                        Cancelar
-                      </Button>
-                      <Button onClick={handleCreateLicense}>Cadastrar</Button>
-                    </DialogFooter>
-                  </DialogContent>
-                </Dialog>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-slate-400" />
-                  <Input
-                    placeholder="Buscar por empresa, CNPJ ou email..."
-                    className="pl-10"
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                  />
-                </div>
-
-                <div className="space-y-3">
-                  {filteredLicenses.map((license) => {
-                    const daysLeft = checkLicenseExpiration(license)
-                    const isExpiringSoon = daysLeft > 0 && daysLeft <= 30
-
-                    return (
-                      <div key={license.id} className="border border-slate-200 rounded-lg p-4 space-y-3">
-                        <div className="flex items-start justify-between">
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2 mb-1">
-                              <h3 className="font-bold text-lg">{license.companyName}</h3>
-                              {getStatusBadge(license.status)}
-                            </div>
-                            <div className="text-sm text-slate-600 space-y-1">
-                              <p>CNPJ: {license.cnpj}</p>
-                              <p>Email: {license.email}</p>
-                              <p>Telefone: {license.phone}</p>
-                            </div>
-                          </div>
-                          <div className="flex gap-2">
-                            <Button variant="outline" size="icon" onClick={() => openEditDialog(license)}>
-                              <Edit className="w-4 h-4" />
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="icon"
-                              onClick={() => handleDeleteLicense(license.id)}
-                              className="text-red-500 hover:text-red-700 hover:bg-red-50"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </Button>
-                          </div>
-                        </div>
-
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-3 border-t border-slate-100">
-                          <div>
-                            <p className="text-xs text-slate-500">Plano</p>
-                            <p className="font-semibold text-sm">{getPlanLabel(license.plan)}</p>
-                          </div>
-                          <div>
-                            <p className="text-xs text-slate-500">Usuários</p>
-                            <p className="font-semibold text-sm">
-                              {license.currentUsers} / {license.maxUsers}
-                            </p>
-                          </div>
-                          <div>
-                            <p className="text-xs text-slate-500">Início</p>
-                            <p className="font-semibold text-sm">
-                              {new Date(license.startDate).toLocaleDateString("pt-BR")}
-                            </p>
-                          </div>
-                          <div>
-                            <p className="text-xs text-slate-500">Expiração</p>
-                            <p className={`font-semibold text-sm ${isExpiringSoon ? "text-orange-600" : ""}`}>
-                              {new Date(license.expirationDate).toLocaleDateString("pt-BR")}
-                              {isExpiringSoon && <span className="ml-1">({daysLeft} dias)</span>}
-                            </p>
-                          </div>
-                        </div>
-
-                        {license.notes && (
-                          <div className="pt-2 border-t border-slate-100">
-                            <p className="text-xs text-slate-500 mb-1">Observações:</p>
-                            <p className="text-sm text-slate-700">{license.notes}</p>
-                          </div>
-                        )}
-                      </div>
-                    )
-                  })}
-
-                  {filteredLicenses.length === 0 && (
-                    <div className="text-center py-12 text-slate-500">
-                      <CreditCard className="w-12 h-12 mx-auto mb-3 opacity-30" />
-                      <p>Nenhuma licença encontrada</p>
-                    </div>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="alerts" className="space-y-6 mt-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <AlertCircle className="w-5 h-5 text-orange-600" />
-                  Licenças Expirando (30 dias)
-                </CardTitle>
-                <CardDescription>Licenças que precisam de renovação em breve</CardDescription>
-              </CardHeader>
-              <CardContent>
-                {expiringLicenses.length > 0 ? (
-                  <div className="space-y-3">
-                    {expiringLicenses.map((license) => {
-                      const daysLeft = checkLicenseExpiration(license)
-                      return (
-                        <div
-                          key={license.id}
-                          className="flex items-center justify-between p-3 bg-orange-50 border border-orange-200 rounded-lg"
-                        >
-                          <div className="flex-1">
-                            <p className="font-semibold">{license.companyName}</p>
-                            <p className="text-sm text-slate-600">{license.email}</p>
-                          </div>
-                          <div className="text-right">
-                            <p className="text-lg font-bold text-orange-600">{daysLeft} dias</p>
-                            <p className="text-xs text-slate-600">
-                              Expira em {new Date(license.expirationDate).toLocaleDateString("pt-BR")}
-                            </p>
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                ) : (
-                  <div className="text-center py-12 text-slate-500">
-                    <CheckCircle2 className="w-12 h-12 mx-auto mb-3 text-green-500 opacity-30" />
-                    <p>Nenhuma licença expirando nos próximos 30 dias</p>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <XCircle className="w-5 h-5 text-red-600" />
-                  Licenças Suspensas ou Expiradas
-                </CardTitle>
-                <CardDescription>Licenças que precisam de atenção imediata</CardDescription>
-              </CardHeader>
-              <CardContent>
-                {licenses.filter((l) => l.status === "suspended" || l.status === "expired").length > 0 ? (
-                  <div className="space-y-3">
-                    {licenses
-                      .filter((l) => l.status === "suspended" || l.status === "expired")
-                      .map((license) => (
-                        <div
-                          key={license.id}
-                          className="flex items-center justify-between p-3 bg-red-50 border border-red-200 rounded-lg"
-                        >
-                          <div className="flex-1">
-                            <p className="font-semibold">{license.companyName}</p>
-                            <p className="text-sm text-slate-600">{license.email}</p>
-                          </div>
-                          <div className="flex items-center gap-3">
-                            {getStatusBadge(license.status)}
-                            <Button size="sm" variant="outline" onClick={() => openEditDialog(license)}>
-                              Reativar
-                            </Button>
-                          </div>
-                        </div>
-                      ))}
-                  </div>
-                ) : (
-                  <div className="text-center py-12 text-slate-500">
-                    <CheckCircle2 className="w-12 h-12 mx-auto mb-3 text-green-500 opacity-30" />
-                    <p>Todas as licenças estão ativas</p>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-        </Tabs>
-
-        {/* Edit Dialog */}
-        <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>Editar Licença</DialogTitle>
-              <DialogDescription>Atualize os dados da licença</DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4 py-4">
-              <div className="grid grid-cols-2 gap-4">
+          <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+            <DialogTrigger asChild>
+              <Button className="gap-2">
+                <Plus className="w-4 h-4" />
+                Nova Empresa
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Cadastrar Nova Empresa</DialogTitle>
+                <DialogDescription>
+                  Preencha os dados da nova empresa
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 py-4">
                 <div className="space-y-2">
-                  <Label htmlFor="edit-companyName">Nome da Empresa</Label>
+                  <Label htmlFor="companyName">Nome</Label>
                   <Input
-                    id="edit-companyName"
-                    value={formData.companyName}
-                    onChange={(e) => setFormData({ ...formData, companyName: e.target.value })}
+                    id="companyName"
+                    placeholder="Nome da empresa"
+                    value={formData.name}
+                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="edit-cnpj">CNPJ</Label>
-                  <Input id="edit-cnpj" value={formData.cnpj} disabled className="bg-slate-50" />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="edit-email">Email</Label>
+                  <Label htmlFor="companyCnpj">CNPJ</Label>
                   <Input
-                    id="edit-email"
+                    id="companyCnpj"
+                    placeholder="00.000.000/0001-00"
+                    value={formData.cnpj}
+                    onChange={(e) => setFormData({ ...formData, cnpj: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="companyEmail">Email</Label>
+                  <Input
+                    id="companyEmail"
                     type="email"
+                    placeholder="empresa@email.com"
                     value={formData.email}
                     onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="edit-phone">Telefone</Label>
+                  <Label htmlFor="companyPhone">Telefone</Label>
                   <Input
-                    id="edit-phone"
+                    id="companyPhone"
+                    placeholder="(11) 99999-9999"
                     value={formData.phone}
                     onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
                   />
                 </div>
-              </div>
-              <div className="grid grid-cols-3 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="edit-plan">Plano</Label>
-                  <Select value={formData.plan} onValueChange={(value) => setFormData({ ...formData, plan: value })}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="basic">Básico</SelectItem>
-                      <SelectItem value="professional">Profissional</SelectItem>
-                      <SelectItem value="enterprise">Enterprise</SelectItem>
-                    </SelectContent>
-                  </Select>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="companyPlan">Plano</Label>
+                    <Select
+                      value={formData.plan}
+                      onValueChange={(value) => setFormData({ ...formData, plan: value })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="basic">Basic</SelectItem>
+                        <SelectItem value="professional">Professional</SelectItem>
+                        <SelectItem value="enterprise">Enterprise</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="companyStatus">Status</Label>
+                    <Select
+                      value={formData.status}
+                      onValueChange={(value) => setFormData({ ...formData, status: value })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="trial">Trial</SelectItem>
+                        <SelectItem value="active">Ativo</SelectItem>
+                        <SelectItem value="suspended">Suspenso</SelectItem>
+                        <SelectItem value="expired">Expirado</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="edit-status">Status</Label>
-                  <Select
-                    value={formData.status}
-                    onValueChange={(value) => setFormData({ ...formData, status: value })}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="trial">Teste</SelectItem>
-                      <SelectItem value="active">Ativa</SelectItem>
-                      <SelectItem value="suspended">Suspensa</SelectItem>
-                      <SelectItem value="expired">Expirada</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="edit-maxUsers">Máx. Usuários</Label>
+                  <Label htmlFor="companyMaxUsers">Máximo de Usuários</Label>
                   <Input
-                    id="edit-maxUsers"
+                    id="companyMaxUsers"
                     type="number"
-                    min="1"
                     value={formData.maxUsers}
-                    onChange={(e) => setFormData({ ...formData, maxUsers: Number.parseInt(e.target.value) })}
+                    onChange={(e) => setFormData({ ...formData, maxUsers: parseInt(e.target.value) })}
                   />
                 </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="companyStartDate">Data de Início</Label>
+                    <Input
+                      id="companyStartDate"
+                      type="date"
+                      value={formData.startDate}
+                      onChange={(e) => setFormData({ ...formData, startDate: e.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="companyExpirationDate">Data de Expiração</Label>
+                    <Input
+                      id="companyExpirationDate"
+                      type="date"
+                      value={formData.expirationDate}
+                      onChange={(e) => setFormData({ ...formData, expirationDate: e.target.value })}
+                    />
+                  </div>
+                </div>
+                <div className="border-t pt-4 mt-4">
+                  <h4 className="font-medium mb-3">Usuário Administrador</h4>
+                  <div className="space-y-2">
+                    <Label htmlFor="userName">Nome do Administrador</Label>
+                    <Input
+                      id="userName"
+                      placeholder="Nome completo"
+                      value={userFormData.nome_completo}
+                      onChange={(e) => setUserFormData({ ...userFormData, nome_completo: e.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-2 mt-2">
+                    <Label htmlFor="userCpf">CPF</Label>
+                    <Input
+                      id="userCpf"
+                      placeholder="000.000.000-00"
+                      value={userFormData.cpf}
+                      onChange={(e) => setUserFormData({ ...userFormData, cpf: e.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-2 mt-2">
+                    <Label htmlFor="userEmail">Email do Administrador</Label>
+                    <Input
+                      id="userEmail"
+                      type="email"
+                      placeholder="admin@empresa.com"
+                      value={userFormData.email}
+                      onChange={(e) => setUserFormData({ ...userFormData, email: e.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-2 mt-2">
+                    <Label htmlFor="userPassword">Senha</Label>
+                    <Input
+                      id="userPassword"
+                      type="password"
+                      placeholder="Senha de acesso"
+                      value={userFormData.senha}
+                      onChange={(e) => setUserFormData({ ...userFormData, senha: e.target.value })}
+                    />
+                  </div>
+                </div>
+                {error && <p className="text-sm text-red-500">{error}</p>}
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="edit-startDate">Data de Início</Label>
-                  <Input
-                    id="edit-startDate"
-                    type="date"
-                    value={formData.startDate}
-                    onChange={(e) => setFormData({ ...formData, startDate: e.target.value })}
-                  />
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
+                  Cancelar
+                </Button>
+                <Button onClick={handleCreateCompany}>Cadastrar</Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {filteredCompanies.map((company) => (
+            <Card key={company.id} className="hover:shadow-md transition-shadow">
+              <CardHeader className="flex flex-row items-start justify-between space-y-0">
+                <div>
+                  <CardTitle className="text-lg">{company.name}</CardTitle>
+                  <CardDescription className="mt-1">{company.cnpj}</CardDescription>
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="edit-expirationDate">Data de Expiração</Label>
-                  <Input
-                    id="edit-expirationDate"
-                    type="date"
-                    value={formData.expirationDate}
-                    onChange={(e) => setFormData({ ...formData, expirationDate: e.target.value })}
-                  />
+                <div className="flex gap-1">
+                  {getPlanBadge(company.plan || "basic")}
                 </div>
-              </div>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2 text-sm">
+                  {company.email && (
+                    <div className="flex items-center gap-2 text-slate-600">
+                      <span className="font-medium">Email:</span> {company.email}
+                    </div>
+                  )}
+                  {company.phone && (
+                    <div className="flex items-center gap-2 text-slate-600">
+                      <span className="font-medium">Tel:</span> {company.phone}
+                    </div>
+                  )}
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium">Status:</span>
+                    {getStatusBadge(company.license_status || company.status || "trial")}
+                  </div>
+                  <div className="flex items-center gap-2 text-slate-600">
+                    <span className="font-medium">Usuários:</span> {company.current_users || 0}/{company.max_users || 5}
+                  </div>
+                </div>
+                <div className="flex gap-2 mt-4">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="flex-1"
+                    onClick={() => handleEditCompany(company)}
+                  >
+                    <Pencil className="w-4 h-4 mr-1" />
+                    Editar
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-red-500 hover:text-red-700 hover:bg-red-50"
+                    onClick={() => handleDeleteCompany(company.id)}
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+
+        {filteredCompanies.length === 0 && (
+          <div className="text-center py-12">
+            <Building2 className="w-12 h-12 text-slate-300 mx-auto mb-4" />
+            <p className="text-slate-500">Nenhuma empresa encontrada</p>
+          </div>
+        )}
+
+        <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Editar Empresa</DialogTitle>
+              <DialogDescription>
+                Atualize os dados da empresa
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
               <div className="space-y-2">
-                <Label htmlFor="edit-notes">Observações</Label>
-                <Textarea
-                  id="edit-notes"
-                  value={formData.notes}
-                  onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                  rows={3}
+                <Label htmlFor="editCompanyName">Nome</Label>
+                <Input
+                  id="editCompanyName"
+                  value={editFormData.name}
+                  onChange={(e) => setEditFormData({ ...editFormData, name: e.target.value })}
                 />
               </div>
+              <div className="space-y-2">
+                <Label htmlFor="editCompanyEmail">Email</Label>
+                <Input
+                  id="editCompanyEmail"
+                  value={editFormData.email}
+                  onChange={(e) => setEditFormData({ ...editFormData, email: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="editCompanyPhone">Telefone</Label>
+                <Input
+                  id="editCompanyPhone"
+                  value={editFormData.phone}
+                  onChange={(e) => setEditFormData({ ...editFormData, phone: e.target.value })}
+                />
+              </div>
+              {error && <p className="text-sm text-red-500">{error}</p>}
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>
                 Cancelar
               </Button>
-              <Button onClick={handleEditLicense}>Salvar Alterações</Button>
+              <Button onClick={handleUpdateCompany}>Salvar</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

@@ -1,6 +1,6 @@
 // Configuration for demo mode
 // Set to false in production for client instances
-export const DEMO_MODE = true
+export const DEMO_MODE = false
 
-// In production, this should be an environment variable
-// DEMO_MODE = process.env.NEXT_PUBLIC_DEMO_MODE === 'true'
+// API Configuration
+export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001/api"

@@ -1,7 +1,6 @@
 "use server";
 
-import { tenantQuery } from "./db";
-import { getAllServices, Service, ServicePriority } from "./services";
+import { query } from "./db";
 
 export interface DBService {
   id: number;
@@ -27,8 +26,7 @@ export async function getTenantServices(
   tenantId: string,
 ): Promise<DBService[]> {
   try {
-    const result = await tenantQuery(
-      tenantId,
+    const result = await query(
       `
       SELECT 
         so.id,
@@ -51,8 +49,10 @@ export async function getTenantServices(
       FROM service_orders so
       JOIN customers c ON so.customer_id = c.id
       JOIN vehicles v ON so.vehicle_id = v.id
+      WHERE so.tenant_id = $1
       ORDER BY so.created_at DESC
     `,
+      [tenantId],
     );
     return result.rows;
   } catch (error) {
@@ -75,11 +75,11 @@ export async function createTenantService(
   },
 ): Promise<{ success: boolean; error?: string; serviceId?: number }> {
   try {
-    // Check/Create customer
-    const customerResult = await tenantQuery(
-      tenantId,
-      "SELECT id FROM customers WHERE phone = $1",
-      [data.customerPhone],
+    const client = await query("BEGIN");
+    
+    const customerResult = await query(
+      "SELECT id FROM customers WHERE phone = $1 AND tenant_id = $2",
+      [data.customerPhone, tenantId],
     );
 
     let customerId: number;
@@ -87,19 +87,16 @@ export async function createTenantService(
     if (customerResult.rows.length > 0) {
       customerId = customerResult.rows[0].id;
     } else {
-      const newCustomer = await tenantQuery(
-        tenantId,
-        "INSERT INTO customers (name, phone) VALUES ($1, $2) RETURNING id",
-        [data.customerName, data.customerPhone],
+      const newCustomer = await query(
+        "INSERT INTO customers (name, phone, tenant_id) VALUES ($1, $2, $3) RETURNING id",
+        [data.customerName, data.customerPhone, tenantId],
       );
       customerId = newCustomer.rows[0].id;
     }
 
-    // Check/Create vehicle
-    const vehicleResult = await tenantQuery(
-      tenantId,
-      "SELECT id FROM vehicles WHERE plate = $1",
-      [data.vehiclePlate],
+    const vehicleResult = await query(
+      "SELECT id FROM vehicles WHERE plate = $1 AND tenant_id = $2",
+      [data.vehiclePlate, tenantId],
     );
 
     let vehicleId: number;
@@ -107,57 +104,24 @@ export async function createTenantService(
     if (vehicleResult.rows.length > 0) {
       vehicleId = vehicleResult.rows[0].id;
     } else {
-      const newVehicle = await tenantQuery(
-        tenantId,
-        "INSERT INTO vehicles (customer_id, brand, model, plate) VALUES ($1, $2, $3, $4) RETURNING id",
-        [customerId, data.vehicleBrand, data.vehicleModel, data.vehiclePlate],
+      const newVehicle = await query(
+        "INSERT INTO vehicles (customer_id, brand, model, plate, tenant_id) VALUES ($1, $2, $3, $4, $5) RETURNING id",
+        [customerId, data.vehicleBrand, data.vehicleModel, data.vehiclePlate, tenantId],
       );
       vehicleId = newVehicle.rows[0].id;
     }
 
-    // Create service order
-    const serviceResult = await tenantQuery(
-      tenantId,
-      `INSERT INTO service_orders (customer_id, vehicle_id, description, priority, created_by)
-       VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-      [customerId, vehicleId, data.description, data.priority, data.createdBy],
+    const serviceResult = await query(
+      `INSERT INTO service_orders (customer_id, vehicle_id, description, priority, created_by, tenant_id)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+      [customerId, vehicleId, data.description, data.priority, data.createdBy, tenantId],
     );
 
+    await query("COMMIT");
     return { success: true, serviceId: serviceResult.rows[0].id };
   } catch (error: any) {
+    await query("ROLLBACK");
     console.error("[v0] Error creating service:", error);
-    return { success: false, error: error.message };
-  }
-}
-
-export async function updateService(
-  id: string,
-  data: {
-    clientName?: string;
-    clientPhone?: string;
-    vehicle?: string;
-    plate?: string;
-    description?: string;
-    priority?: ServicePriority;
-    status?: Service["status"];
-  },
-): Promise<{ success: boolean; error?: string }> {
-  try {
-    const services = getAllServices();
-    const index = services.findIndex((s) => s.id === id);
-
-    if (index === -1)
-      return { success: false, error: "Serviço não encontrado" };
-
-    services[index] = {
-      ...services[index],
-      ...data,
-      plate: data.plate ? data.plate.toUpperCase() : services[index].plate,
-    };
-
-    localStorage.setItem("services", JSON.stringify(services));
-    return { success: true };
-  } catch (error: any) {
     return { success: false, error: error.message };
   }
 }
@@ -188,11 +152,10 @@ export async function updateServiceStatus(
       updates.push(`completed_at = CURRENT_TIMESTAMP`);
     }
 
-    values.push(serviceId);
+    values.push(serviceId, tenantId);
 
-    await tenantQuery(
-      tenantId,
-      `UPDATE service_orders SET ${updates.join(", ")} WHERE id = $${paramIndex}`,
+    await query(
+      `UPDATE service_orders SET ${updates.join(", ")} WHERE id = $${paramIndex++} AND tenant_id = $${paramIndex}`,
       values,
     );
 
@@ -208,8 +171,9 @@ export async function deleteTenantService(
   serviceId: number,
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    await tenantQuery(tenantId, "DELETE FROM service_orders WHERE id = $1", [
+    await query("DELETE FROM service_orders WHERE id = $1 AND tenant_id = $2", [
       serviceId,
+      tenantId,
     ]);
     return { success: true };
   } catch (error: any) {

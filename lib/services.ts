@@ -7,8 +7,8 @@ export interface Service {
   id: string;
   clientName: string;
   clientPhone: string;
-  vehicle: string;
-  plate: string;
+  brand: string;
+  model: string;
   description: string;
   priority: ServicePriority;
   status: ServiceStatus;
@@ -93,8 +93,8 @@ export function updateService(
   data: {
     clientName?: string;
     clientPhone?: string;
-    vehicle?: string;
-    plate?: string;
+    brand?: string;
+    model?: string;
     description?: string;
     priority?: ServicePriority;
     status?: ServiceStatus;
@@ -115,7 +115,6 @@ export function updateService(
     services[index] = {
       ...services[index],
       ...data,
-      plate: data.plate ? data.plate.toUpperCase() : services[index].plate,
       updatedAt: new Date().toISOString(),
     };
 

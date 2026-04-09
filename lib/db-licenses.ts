@@ -1,22 +1,22 @@
-"use server"
+"use server";
 
-import { query, createTenantSchema } from "./db"
+import { query } from "./db";
 
 export interface DBLicense {
-  id: number
-  company_id: number
-  company_name: string
-  cnpj: string
-  email: string
-  phone: string
-  plan: "basic" | "professional" | "enterprise"
-  status: "active" | "suspended" | "expired" | "trial"
-  max_users: number
-  current_users: number
-  start_date: string
-  expiration_date: string
-  created_at: string
-  notes?: string
+  id: number;
+  company_id: number;
+  company_name: string;
+  cnpj: string;
+  email: string;
+  phone: string;
+  plan: "basic" | "professional" | "enterprise";
+  status: "active" | "suspended" | "expired" | "trial";
+  max_users: number;
+  current_users: number;
+  start_date: string;
+  expiration_date: string;
+  created_at: string;
+  notes?: string;
 }
 
 export async function getAllLicensesDB(): Promise<DBLicense[]> {
@@ -37,69 +37,57 @@ export async function getAllLicensesDB(): Promise<DBLicense[]> {
         l.expiration_date::text,
         l.created_at::text,
         l.notes
-      FROM public.licenses l
-      JOIN public.companies c ON l.company_id = c.id
+      FROM licenses l
+      JOIN companies c ON l.company_id = c.id
       ORDER BY l.created_at DESC
-    `)
-    return result.rows
+    `);
+    return result.rows;
   } catch (error) {
-    console.error("[v0] Error fetching licenses:", error)
-    return []
+    console.error("[v0] Error fetching licenses:", error);
+    return [];
   }
 }
 
 export async function createLicenseDB(data: {
-  companyName: string
-  cnpj: string
-  email: string
-  phone: string
-  plan: string
-  status: string
-  maxUsers: number
-  startDate: string
-  expirationDate: string
-  notes?: string
+  companyName: string;
+  cnpj: string;
+  email: string;
+  phone: string;
+  plan: string;
+  status: string;
+  maxUsers: number;
+  startDate: string;
+  expirationDate: string;
+  notes?: string;
 }): Promise<{ success: boolean; error?: string }> {
   try {
-    // Check if company exists
-    const existingCompany = await query("SELECT id, schema_name FROM public.companies WHERE cnpj = $1", [data.cnpj])
+    const existingCompany = await query("SELECT id FROM companies WHERE cnpj = $1", [data.cnpj]);
 
-    let companyId: number
-    let schemaName: string
+    let companyId: number;
 
     if (existingCompany.rows.length > 0) {
-      companyId = existingCompany.rows[0].id
-      schemaName = existingCompany.rows[0].schema_name
+      companyId = existingCompany.rows[0].id;
     } else {
-      // Create new company
-      const tenantId = data.cnpj.replace(/[^\d]/g, "")
-      schemaName = `company_${tenantId}`
-
       const companyResult = await query(
-        `INSERT INTO public.companies (name, cnpj, email, phone, schema_name)
-         VALUES ($1, $2, $3, $4, $5)
+        `INSERT INTO companies (name, cnpj, email, phone)
+         VALUES ($1, $2, $3, $4)
          RETURNING id`,
-        [data.companyName, data.cnpj, data.email, data.phone, schemaName],
-      )
-
-      companyId = companyResult.rows[0].id
-
-      // Create tenant schema
-      await createTenantSchema(data.cnpj)
+        [data.companyName, data.cnpj, data.email, data.phone],
+      );
+      companyId = companyResult.rows[0].id;
     }
 
-    // Create license
     await query(
-      `INSERT INTO public.licenses 
+      `INSERT INTO licenses 
        (company_id, plan, status, max_users, current_users, start_date, expiration_date, notes)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
       [companyId, data.plan, data.status, data.maxUsers, 0, data.startDate, data.expirationDate, data.notes],
-    )
+    );
 
-    return { success: true }
+    return { success: true };
   } catch (error: any) {
-    console.error("[v0] Error creating license:", error)
-    return { success: false, error: error.message }
+    console.error("[v0] Error creating license:", error);
+    return { success: false, error: error.message };
   }
 }
 
@@ -108,73 +96,59 @@ export async function updateLicenseDB(
   data: Partial<DBLicense>,
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    const updates: string[] = []
-    const values: any[] = []
-    let paramIndex = 1
+    const updates: string[] = [];
+    const values: any[] = [];
+    let paramIndex = 1;
 
     if (data.status) {
-      updates.push(`status = $${paramIndex++}`)
-      values.push(data.status)
+      updates.push(`status = $${paramIndex++}`);
+      values.push(data.status);
     }
     if (data.plan) {
-      updates.push(`plan = $${paramIndex++}`)
-      values.push(data.plan)
+      updates.push(`plan = $${paramIndex++}`);
+      values.push(data.plan);
     }
     if (data.max_users !== undefined) {
-      updates.push(`max_users = $${paramIndex++}`)
-      values.push(data.max_users)
+      updates.push(`max_users = $${paramIndex++}`);
+      values.push(data.max_users);
     }
     if (data.expiration_date) {
-      updates.push(`expiration_date = $${paramIndex++}`)
-      values.push(data.expiration_date)
+      updates.push(`expiration_date = $${paramIndex++}`);
+      values.push(data.expiration_date);
     }
     if (data.notes !== undefined) {
-      updates.push(`notes = $${paramIndex++}`)
-      values.push(data.notes)
+      updates.push(`notes = $${paramIndex++}`);
+      values.push(data.notes);
     }
 
     if (updates.length === 0) {
-      return { success: true }
+      return { success: true };
     }
 
-    values.push(id)
-    await query(`UPDATE public.licenses SET ${updates.join(", ")} WHERE id = $${paramIndex}`, values)
+    values.push(id);
+    await query(`UPDATE licenses SET ${updates.join(", ")} WHERE id = $${paramIndex}`, values);
 
-    return { success: true }
+    return { success: true };
   } catch (error: any) {
-    console.error("[v0] Error updating license:", error)
-    return { success: false, error: error.message }
+    console.error("[v0] Error updating license:", error);
+    return { success: false, error: error.message };
   }
 }
 
 export async function deleteLicenseDB(id: number): Promise<{ success: boolean; error?: string }> {
   try {
-    // Get company info before deleting license
-    const licenseResult = await query("SELECT company_id FROM public.licenses WHERE id = $1", [id])
+    const licenseResult = await query("SELECT company_id FROM licenses WHERE id = $1", [id]);
 
     if (licenseResult.rows.length === 0) {
-      return { success: false, error: "License not found" }
+      return { success: false, error: "License not found" };
     }
 
-    const companyId = licenseResult.rows[0].company_id
+    await query("DELETE FROM licenses WHERE id = $1", [id]);
 
-    // Delete license
-    await query("DELETE FROM public.licenses WHERE id = $1", [id])
-
-    // Check if company has other licenses
-    const remainingLicenses = await query("SELECT COUNT(*) as count FROM public.licenses WHERE company_id = $1", [
-      companyId,
-    ])
-
-    // If no more licenses, optionally delete company (or just mark inactive)
-    if (remainingLicenses.rows[0].count === "0") {
-      console.log(`[v0] Company ${companyId} has no more licenses`)
-    }
-
-    return { success: true }
+    return { success: true };
   } catch (error: any) {
-    console.error("[v0] Error deleting license:", error)
-    return { success: false, error: error.message }
+    console.error("[v0] Error deleting license:", error);
+    return { success: false, error: error.message };
   }
 }
 
@@ -193,8 +167,8 @@ export async function getLicenseStatsDB() {
           WHEN status IN ('active', 'trial') AND plan = 'enterprise' THEN 499
           ELSE 0
         END) as revenue
-      FROM public.licenses
-    `)
+      FROM licenses
+    `);
 
     return {
       total: Number(result.rows[0].total),
@@ -203,9 +177,9 @@ export async function getLicenseStatsDB() {
       expired: Number(result.rows[0].expired),
       trial: Number(result.rows[0].trial),
       revenue: Number(result.rows[0].revenue),
-    }
+    };
   } catch (error) {
-    console.error("[v0] Error fetching license stats:", error)
-    return { total: 0, active: 0, suspended: 0, expired: 0, trial: 0, revenue: 0 }
+    console.error("[v0] Error fetching license stats:", error);
+    return { total: 0, active: 0, suspended: 0, expired: 0, trial: 0, revenue: 0 };
   }
 }

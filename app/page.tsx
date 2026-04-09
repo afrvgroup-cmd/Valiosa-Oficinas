@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { LoginForm } from "@/components/login-form"
-import { initializeUsers, login, getAuthState } from "@/lib/auth"
+import { login, getAuthState, getCurrentUser, logout } from "@/lib/auth"
 
 export default function HomePage() {
   const [error, setError] = useState("")
@@ -11,24 +11,22 @@ export default function HomePage() {
   const router = useRouter()
 
   useEffect(() => {
-    initializeUsers()
-
-    const { isAuthenticated, user } = getAuthState()
-    if (isAuthenticated && user) {
+    const user = getCurrentUser()
+    if (user) {
       if (user.role === "super-admin") {
         router.push("/licenses")
       } else if (user.role === "admin") {
         router.push("/admin")
       } else {
-        router.push(user.role === "mechanic" ? "/mechanic" : "/attendant")
+        router.push("/attendant")
       }
     } else {
       setIsLoading(false)
     }
   }, [router])
 
-  const handleLogin = (email: string, password: string) => {
-    const user = login(email, password)
+  const handleLogin = async (email: string, password: string) => {
+    const user = await login(email, password)
 
     if (user) {
       if (user.role === "super-admin") {
@@ -36,7 +34,7 @@ export default function HomePage() {
       } else if (user.role === "admin") {
         router.push("/admin")
       } else {
-        router.push(user.role === "mechanic" ? "/mechanic" : "/attendant")
+        router.push("/attendant")
       }
     } else {
       setError("Email ou senha incorretos")
