@@ -23,7 +23,7 @@ export default function HomePage() {
     } else {
       setIsLoading(false)
     }
-  }, [router])
+  }, [])
 
   const handleLogin = async (email: string, password: string) => {
     const user = await login(email, password)

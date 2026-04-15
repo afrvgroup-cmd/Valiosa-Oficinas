@@ -18,7 +18,9 @@ export interface Service {
   observations?: string;
   completedBy?: string;
   queue?: string;
+  queue_id?: string;
   professional?: string;
+  assigned_to?: string;
 }
 
 export function getAllServices(): Service[] {

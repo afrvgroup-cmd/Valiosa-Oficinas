@@ -96,6 +96,8 @@ export async function updateService(
     completedBy?: string;
     priority?: ServicePriority;
     description?: string;
+    queueId?: string;
+    assignedTo?: string;
   },
 ): Promise<Service> {
   const result = await fetchWithAuth(`/services/${id}`, {

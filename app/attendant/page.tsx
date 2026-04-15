@@ -21,6 +21,7 @@ import {
 } from "@/lib/api-customers";
 import { getAllQueueCategories, type QueueCategory } from "@/lib/api-queue";
 import { getAllUsers, getUsersByQueue, type User } from "@/lib/api-users";
+import { getAllHistory, createHistory, getHistoryByServiceOrder } from "@/lib/api-history";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -107,6 +108,7 @@ export default function AttendantPage() {
   const [editQueue, setEditQueue] = useState("");
   const [editProfessional, setEditProfessional] = useState("");
   const [editObservations, setEditObservations] = useState("");
+  const [serviceHistory, setServiceHistory] = useState<any[]>([]);
 
   // Create client
   const [isClientDialogOpen, setIsClientDialogOpen] = useState(false);
@@ -120,9 +122,8 @@ export default function AttendantPage() {
   const [clientFormZip, setClientFormZip] = useState("");
 
   useEffect(() => {
-    const { isAuthenticated, user } = getAuthState();
-
-    if (!isAuthenticated || user?.role !== "attendant") {
+    const { user } = getAuthState();
+    if (!user) {
       router.push("/");
       return;
     }
@@ -131,7 +132,7 @@ export default function AttendantPage() {
     loadCustomers();
     loadQueueCategories();
     loadUsers();
-  }, [router]);
+  }, []);
 
   const loadCustomers = async () => {
     try {
@@ -151,18 +152,19 @@ export default function AttendantPage() {
     }
   };
 
-  const loadUsers = async (selectedQueueId?: number) => {
+  const loadUsers = async () => {
     try {
-      const allUsers = await getUsersByQueue(selectedQueueId);
+      const allUsers = await getUsersByQueue();
       setUsers(allUsers);
     } catch (err) {
       console.error("Erro ao carregar usuários:", err);
+      setUsers([]);
     }
   };
 
   useEffect(() => {
-    loadUsers(queue ? parseInt(queue) : undefined);
-  }, [queue]);
+    loadUsers();
+  }, []);
 
   useEffect(() => {
     if (users.length > 0) {
@@ -233,12 +235,12 @@ export default function AttendantPage() {
         customerPhone: selectedCustomer.phone,
         brand,
         model,
-        obs: "",
         description,
         priority,
-        queue,
-        professional,
+        queue: queue || " ",
+        professional: professional || " ",
         createdBy: user.name,
+        obs: "",
       });
 
       setSelectedCustomerId("");
@@ -302,22 +304,34 @@ export default function AttendantPage() {
     }
   };
 
-  const handleOpenEdit = (service: Service) => {
+  const handleOpenEdit = async (service: Service) => {
     setEditingService(service);
-    setEditClientName(service.customer_name);
-    setEditClientPhone(service.customer_phone);
-    setEditBrand(service.brand);
-    setEditModel(service.model);
-    setEditDescription(service.description);
+    setEditClientName((service as any).customer_name || "");
+    setEditClientPhone((service as any).customer_phone || "");
+    setEditBrand((service as any).brand || "");
+    setEditModel((service as any).model || "");
+    setEditDescription(service.description || "");
     setEditPriority(service.priority ?? "medium");
     setEditStatus(service.status ?? "pending");
-    setEditQueue(service.queue ?? "");
-    setEditProfessional(service.professional ?? "");
+    setEditQueue((service as any).queue_id?.toString() || "");
+    setEditProfessional((service as any).assigned_to?.toString() || "");
     setEditObservations("");
+    
+    // Load history for this service
+    try {
+      const history = await getHistoryByServiceOrder(service.id.toString());
+      setServiceHistory(history);
+    } catch (err) {
+      console.error("Erro ao carregar histórico:", err);
+      setServiceHistory([]);
+    }
   };
 
   const handleUpdateService = async () => {
     if (!editingService) return;
+
+    const user = getCurrentUser();
+    const userName = user?.name || "Usuário";
 
     try {
       await apiUpdateService(editingService.id, {
@@ -325,7 +339,19 @@ export default function AttendantPage() {
         priority: editPriority,
         status: editStatus,
         observations: editObservations,
+        queueId: editQueue || undefined,
+        assignedTo: editProfessional || undefined,
       });
+
+      // Save to history if there's content
+      if (editObservations && editObservations.trim()) {
+        await createHistory({
+          service_order_id: editingService.id.toString(),
+          action: "Observação adicionada",
+          description: editObservations,
+          performed_by: userName,
+        });
+      }
 
       setSuccessMessage("Serviço atualizado com sucesso!");
       setTimeout(() => setSuccessMessage(""), 3000);
@@ -574,6 +600,12 @@ export default function AttendantPage() {
                                     >
                                       <div className="font-medium">
                                         {customer.name}
+                                      </div>
+                                      <div className="text-xs text-slate-500">
+                                        {customer.phone}{" "}
+                                        {customer.cpf
+                                          ? ` · ${customer.cpf}`
+                                          : ""}
                                       </div>
                                     </div>
                                   ))
@@ -936,7 +968,7 @@ export default function AttendantPage() {
                       <div className="flex items-start justify-between gap-4">
                         <div className="flex-1 min-w-0">
                           <div className="flex items-baseline gap-2 flex-wrap">
-                            <span className="text-xs font-mono text-slate-400">
+                            <span className="font-mono text-slate-400">
                               #{service.service_number}
                             </span>
                             <h3 className="font-semibold text-slate-900 shrink-0">
@@ -1008,9 +1040,11 @@ export default function AttendantPage() {
                       <SelectValue placeholder="Selecione a fila" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="mechanic">Mecânico</SelectItem>
-                      <SelectItem value="attendant">Atendente</SelectItem>
-                      <SelectItem value="admin">Administrador</SelectItem>
+                      {queueCategories.map((cat) => (
+                        <SelectItem key={cat.id} value={cat.id.toString()}>
+                          {cat.name}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
@@ -1024,9 +1058,11 @@ export default function AttendantPage() {
                       <SelectValue placeholder="Selecione o profissional" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="jose">José da Silva</SelectItem>
-                      <SelectItem value="jorge">Jorge dos Santos</SelectItem>
-                      <SelectItem value="admin">Administrador</SelectItem>
+                      {users.map((user) => (
+                        <SelectItem key={user.id} value={user.id.toString()}>
+                          {user.nome_completo}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
@@ -1086,7 +1122,6 @@ export default function AttendantPage() {
                   <Select
                     value={editStatus}
                     onValueChange={(v) => setEditStatus(v as Service["status"])}
-                    disabled
                   >
                     <SelectTrigger className="w-full">
                       <SelectValue />
@@ -1099,27 +1134,35 @@ export default function AttendantPage() {
                   </Select>
                 </div>
               </div>
-              <div>
-                <div className="space-y-2">
+              <div className="space-y-2">
                   <Label>Histórico</Label>
 
-                  <Textarea
-                    value={editDescription}
-                    onChange={(e) => setEditDescription(e.target.value)}
-                    rows={4}
-                    disabled
-                  />
+                  <div className="space-y-2 max-h-60 overflow-y-auto border rounded-md p-3 bg-slate-50">
+                    {/* Problema relatado - descrição inicial */}
+                    <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 mb-2">
+                      <p className="text-xs font-semibold text-orange-700 mb-1">Problema relatado</p>
+                      <p className="text-sm text-slate-700">{editDescription || (editingService as any)?.description || "Sem descrição"}</p>
+                      <p className="text-xs text-slate-500 mt-1">
+                        Criado por: {editingService?.created_by || "Usuário"} em{" "}
+                        {editingService?.created_at && new Date(editingService.created_at).toLocaleString("pt-BR")}
+                      </p>
+                    </div>
+                    
+                    {/* Histórico de observações */}
+                    {serviceHistory.length > 0 ? (
+                      serviceHistory.map((h, idx) => (
+                        <div key={idx} className="text-sm border-b pb-2 last:border-0">
+                          <p className="text-slate-700">{h.description}</p>
+                          <p className="text-xs text-slate-500 mt-1">
+                            {h.performed_by} - {h.created_at && new Date(h.created_at).toLocaleString("pt-BR")}
+                          </p>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-sm text-slate-500">Nenhuma observação registrada</p>
+                    )}
+                  </div>
                 </div>
-                <div>
-                  <p className="text-xs text-slate-500 text-end">
-                    Escrito por: {editingService?.created_by} em{" "}
-                    {editingService?.created_at &&
-                      new Date(editingService.created_at).toLocaleString(
-                        "pt-BR",
-                      )}
-                  </p>
-                </div>
-              </div>
               <div className="space-y-2">
                 <Label>Atualização</Label>
 
@@ -1128,8 +1171,11 @@ export default function AttendantPage() {
                   style={{ maxWidth: "100%" }}
                 >
                   <Textarea
+                    value={editObservations}
+                    onChange={(e) => setEditObservations(e.target.value)}
                     rows={4}
                     className="resize-none border-0 focus-visible:ring-0 pr-16 pb-12 w-full max-h-40 overflow-y-auto"
+                    placeholder="Digite uma observação..."
                     style={{
                       wordBreak: "break-word",
                       overflowWrap: "anywhere",
@@ -1178,6 +1224,13 @@ export default function AttendantPage() {
                   className="flex-1"
                 >
                   Encerrar Serviço
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={handleUpdateService}
+                  className="flex-1"
+                >
+                  Salvar
                 </Button>
               </div>
             </div>

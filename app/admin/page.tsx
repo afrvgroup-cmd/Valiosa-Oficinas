@@ -146,23 +146,21 @@ export default function AdminPage() {
         id: u.id.toString(),
         name: u.nome_completo,
         email: u.email,
+        cargo: u.cargo, // Keep original cargo for custom roles
         role:
           u.cargo === "admin"
             ? ("admin" as const)
             : u.cargo === "atendente"
               ? ("attendant" as const)
-              : ("mechanic" as const),
+              : u.cargo === "mecanico"
+                ? ("mechanic" as const)
+                : (u.cargo as any), // Keep custom role name
+        queues: u.queues || [],
       }));
       setUsers(transformedUsers);
       setStats(statsData);
       setQueueCategories(categoriesData);
       setRoles(rolesData);
-      console.log("Admin data loaded:", {
-        users: transformedUsers.length,
-        stats: statsData,
-        categories: categoriesData.length,
-        roles: rolesData.length,
-      });
     } catch (err) {
       console.error("Erro ao carregar dados:", err);
     } finally {
@@ -222,14 +220,9 @@ export default function AdminPage() {
     setUserEditFormData({
       nome_completo: user.name || "",
       email: user.email || "",
-      cargo:
-        user.role === "admin"
-          ? "admin"
-          : user.role === "attendente"
-            ? "atendente"
-            : "mecanico",
+      cargo: user.cargo || user.role || "mecanico",
       ativo: true,
-      queues: user.queues?.map((q: any) => q.id) || [],
+      queues: user.queues?.map((q: any) => q.id?.toString() || q.id) || [],
     });
     setIsUserEditDialogOpen(true);
   };
@@ -238,7 +231,8 @@ export default function AdminPage() {
     if (!editingUser) return;
 
     try {
-      await updateUser(parseInt(editingUser.id), {
+      // Send ID as string (UUID), not as number
+      await updateUser(editingUser.id, {
         nome_completo: userEditFormData.nome_completo,
         email: userEditFormData.email,
         cargo: userEditFormData.cargo,
@@ -391,9 +385,23 @@ export default function AdminPage() {
     }
   };
 
+  const getUsersByRole = (roleName: string) => {
+    if (roleName === "admin") return users.filter((u) => u.role === "admin");
+    if (roleName === "atendente")
+      return users.filter((u) => u.role === "attendant");
+    if (roleName === "mecanico")
+      return users.filter((u) => u.role === "mechanic");
+    // Custom roles - filter by cargo from transformed data
+    return users.filter((u) => (u as any).cargo === roleName);
+  };
+
   const mechanicUsers = users.filter((u) => u.role === "mechanic");
   const attendantUsers = users.filter((u) => u.role === "attendant");
   const adminUsers = users.filter((u) => u.role === "admin");
+  const customRoleUsers = users.filter(
+    (u) =>
+      u.role !== "mechanic" && u.role !== "attendant" && u.role !== "admin",
+  );
 
   if (isLoading) {
     return (
@@ -670,12 +678,6 @@ export default function AdminPage() {
               </CardHeader>
               <CardContent className="space-y-6">
                 <div className="space-y-3">
-                  <div className="flex items-center gap-2">
-                    <Users className="w-4 h-4 text-blue-600" />
-                    <h3 className="font-semibold">
-                      Mecânicos ({mechanicUsers.length})
-                    </h3>
-                  </div>
                   <div className="space-y-2">
                     {mechanicUsers.map((user) => (
                       <div
@@ -711,64 +713,8 @@ export default function AdminPage() {
                         </div>
                       </div>
                     ))}
-                    {mechanicUsers.length === 0 && (
-                      <p className="text-sm text-slate-500 text-center py-4">
-                        Nenhum mecânico cadastrado
-                      </p>
-                    )}
                   </div>
                 </div>
-
-                <div className="space-y-3">
-                  <div className="flex items-center gap-2">
-                    <Users className="w-4 h-4 text-green-600" />
-                    <h3 className="font-semibold">
-                      Atendentes ({attendantUsers.length})
-                    </h3>
-                  </div>
-                  <div className="space-y-2">
-                    {attendantUsers.map((user) => (
-                      <div
-                        key={user.id}
-                        className="flex items-center justify-between p-3 bg-slate-50 rounded-lg"
-                      >
-                        <div>
-                          <p className="font-medium">{user.name}</p>
-                          <p className="text-sm text-slate-600">{user.email}</p>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <Badge
-                            className={`${getRoleColor(user.role)} text-white`}
-                          >
-                            {getRoleLabel(user.role)}
-                          </Badge>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => handleEditUser(user)}
-                            className="text-blue-500 hover:text-blue-700 hover:bg-blue-50"
-                          >
-                            <Pencil className="w-4 h-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => handleDeleteUser(user.id)}
-                            className="text-red-500 hover:text-red-700 hover:bg-red-50"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
-                        </div>
-                      </div>
-                    ))}
-                    {attendantUsers.length === 0 && (
-                      <p className="text-sm text-slate-500 text-center py-4">
-                        Nenhum atendente cadastrado
-                      </p>
-                    )}
-                  </div>
-                </div>
-
                 <div className="space-y-3">
                   <div className="flex items-center gap-2">
                     <ShieldCheck className="w-4 h-4 text-purple-600" />
@@ -795,6 +741,76 @@ export default function AdminPage() {
                     ))}
                   </div>
                 </div>
+
+                {/* Custom Roles - Dynamic */}
+                {roles
+                  .filter(
+                    (r: any) =>
+                      r.active &&
+                      r.name !== "admin" &&
+                      r.name !== "atendente" &&
+                      r.name !== "mecanico",
+                  )
+                  .map((role: any) => {
+                    const roleUsers = users.filter(
+                      (u) => (u as any).cargo === role.name,
+                    );
+                    if (roleUsers.length === 0) return null;
+                    return (
+                      <div key={role.id} className="space-y-3">
+                        <div className="flex items-center gap-2">
+                          <Users
+                            className="w-4 h-4"
+                            style={{ color: role.color || "#6B7280" }}
+                          />
+                          <h3 className="font-semibold">
+                            {role.name} ({roleUsers.length})
+                          </h3>
+                        </div>
+                        <div className="space-y-2">
+                          {roleUsers.map((user: any) => (
+                            <div
+                              key={user.id}
+                              className="flex items-center justify-between p-3 bg-slate-50 rounded-lg"
+                            >
+                              <div>
+                                <p className="font-medium">{user.name}</p>
+                                <p className="text-sm text-slate-600">
+                                  {user.email}
+                                </p>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Badge
+                                  className="text-white"
+                                  style={{
+                                    backgroundColor: role.color || "#6B7280",
+                                  }}
+                                >
+                                  {role.name}
+                                </Badge>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => handleEditUser(user)}
+                                  className="text-blue-500 hover:text-blue-700 hover:bg-blue-50"
+                                >
+                                  <Pencil className="w-4 h-4" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => handleDeleteUser(user.id)}
+                                  className="text-red-500 hover:text-red-700 hover:bg-red-50"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </Button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
               </CardContent>
             </Card>
 
