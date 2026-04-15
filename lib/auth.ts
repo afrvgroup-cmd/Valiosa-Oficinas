@@ -37,6 +37,9 @@ const ROLE_MAP: Record<string, UserRole> = {
   "super-admin": "super-admin",
 };
 
+const TOKEN_EXPIRY_KEY = "tokenExpiry";
+const SEVEN_HOURS_MS = 7 * 60 * 60 * 1000;
+
 export async function login(
   email: string,
   password: string,
@@ -75,6 +78,7 @@ export async function login(
     localStorage.setItem("authToken", data.token);
     localStorage.setItem("refreshToken", data.refreshToken);
     localStorage.setItem("currentUser", JSON.stringify(user));
+    localStorage.setItem(TOKEN_EXPIRY_KEY, String(Date.now() + SEVEN_HOURS_MS));
 
     return user;
   } catch (error) {
@@ -88,6 +92,34 @@ export function logout() {
   localStorage.removeItem("authToken");
   localStorage.removeItem("refreshToken");
   localStorage.removeItem("currentUser");
+  localStorage.removeItem(TOKEN_EXPIRY_KEY);
+}
+
+export function isTokenExpired(): boolean {
+  if (typeof window === "undefined") return true;
+  const expiry = localStorage.getItem(TOKEN_EXPIRY_KEY);
+  if (!expiry) return true;
+  return Date.now() > parseInt(expiry, 10);
+}
+
+export function checkAndRefreshToken(): Promise<boolean> {
+  if (typeof window === "undefined") return Promise.resolve(false);
+  if (isTokenExpired()) {
+    return refreshAccessToken();
+  }
+  return Promise.resolve(true);
+}
+
+export async function ensureValidToken(): Promise<boolean> {
+  const valid = await checkAndRefreshToken();
+  if (!valid) {
+    logout();
+    if (typeof window !== "undefined") {
+      window.location.href = "/";
+    }
+    return false;
+  }
+  return true;
 }
 
 export function getCurrentUser(): User | null {
@@ -129,6 +161,7 @@ export async function refreshAccessToken(): Promise<boolean> {
     const data = await response.json();
     localStorage.setItem("authToken", data.token);
     localStorage.setItem("refreshToken", data.refreshToken);
+    localStorage.setItem(TOKEN_EXPIRY_KEY, String(Date.now() + SEVEN_HOURS_MS));
     return true;
   } catch {
     return false;

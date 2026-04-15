@@ -119,19 +119,16 @@ export default function AdminPage() {
 
   useEffect(() => {
     const { isAuthenticated, user } = getAuthState();
-    console.log("Auth state:", isAuthenticated, user?.role);
 
     if (!isAuthenticated || user?.role !== "admin") {
       router.push("/");
       return;
     }
 
-    console.log("Loading admin data...");
     loadData();
   }, [router]);
 
   const loadData = async () => {
-    console.log("loadData called");
     try {
       setIsLoading(true);
 

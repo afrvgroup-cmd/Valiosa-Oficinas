@@ -92,7 +92,6 @@ export default function LicensesPage() {
 
   useEffect(() => {
     const { isAuthenticated, user } = getAuthState()
-    console.log("Licenses page auth:", isAuthenticated, user?.role)
 
     if (!isAuthenticated || user?.role !== "super-admin") {
       router.push("/")
@@ -120,7 +119,6 @@ export default function LicensesPage() {
       
       const calculatedStats = calculateStats(companiesData)
       setStats(calculatedStats)
-      console.log("Companies loaded:", companiesData.length)
     } catch (err) {
       console.error("Erro ao carregar dados:", err)
     } finally {
@@ -173,12 +171,9 @@ export default function LicensesPage() {
     }
 
     try {
-      console.log("Creating company:", formData)
       const companyResult = await createCompany(formData)
-      console.log("Company created:", companyResult)
       
       if (userFormData.nome_completo && userFormData.email && userFormData.senha) {
-        console.log("Creating admin user for company:", companyResult.id)
         await createUser({
           nome_completo: userFormData.nome_completo,
           cpf: userFormData.cpf,

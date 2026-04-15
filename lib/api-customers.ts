@@ -1,7 +1,7 @@
 "use client"
 
 import { API_BASE_URL } from "./config"
-import { getAuthToken } from "./auth"
+import { getAuthToken, ensureValidToken } from "./auth"
 
 export interface Customer {
   id: number
@@ -15,6 +15,10 @@ export interface Customer {
 }
 
 async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
+  const valid = await ensureValidToken();
+  if (!valid) {
+    throw new Error("Token expirado");
+  }
   const token = getAuthToken()
   
   const response = await fetch(`${API_BASE_URL}${endpoint}`, {

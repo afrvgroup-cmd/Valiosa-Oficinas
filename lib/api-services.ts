@@ -1,7 +1,7 @@
 "use client";
 
 import { API_BASE_URL } from "./config";
-import { getAuthToken } from "./auth";
+import { getAuthToken, ensureValidToken } from "./auth";
 
 export type ServiceStatus = "pending" | "in-progress" | "completed";
 export type ServicePriority = "low" | "medium" | "high" | "urgent";
@@ -36,6 +36,10 @@ export interface ServiceStats {
 }
 
 async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
+  const valid = await ensureValidToken();
+  if (!valid) {
+    throw new Error("Token expirado");
+  }
   const token = getAuthToken();
 
   const response = await fetch(`${API_BASE_URL}${endpoint}`, {
