@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { getAuthState, logout, type User } from "@/lib/auth";
+import { GlobalSearch } from "@/components/global-search";
 import {
   getAllUsers,
   createUser as apiCreateUser,
@@ -13,6 +14,7 @@ import {
   getAllServices,
   getServiceStats,
   type ServiceStats,
+  type Service,
 } from "@/lib/api-services";
 import {
   getAllQueueCategories,
@@ -97,6 +99,10 @@ export default function AdminPage() {
     queues: [] as number[],
   });
   const [error, setError] = useState("");
+  const [services, setServices] = useState<Service[]>([]);
+  const [serviceSearchTerm, setServiceSearchTerm] = useState("");
+  const [filteredServices, setFilteredServices] = useState<Service[]>([]);
+  const [viewingService, setViewingService] = useState<Service | null>(null);
   const [queueCategories, setQueueCategories] = useState<QueueCategory[]>([]);
   const [isQueueDialogOpen, setIsQueueDialogOpen] = useState(false);
   const [isQueueEditDialogOpen, setIsQueueEditDialogOpen] = useState(false);
@@ -116,6 +122,7 @@ export default function AdminPage() {
     color: "#3B82F6",
   });
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   useEffect(() => {
     const { isAuthenticated, user } = getAuthState();
@@ -132,18 +139,19 @@ export default function AdminPage() {
     try {
       setIsLoading(true);
 
-      const [usersData, statsData, categoriesData, rolesData] =
+      const [usersData, statsData, categoriesData, rolesData, servicesData] =
         await Promise.all([
           getAllUsers(),
           getServiceStats(),
           getAllQueueCategories(),
           getAllRoles(),
+          getAllServices(),
         ]);
       const transformedUsers = usersData.map((u: any) => ({
         id: u.id.toString(),
         name: u.nome_completo,
         email: u.email,
-        cargo: u.cargo, // Keep original cargo for custom roles
+        cargo: u.cargo,
         role:
           u.cargo === "admin"
             ? ("admin" as const)
@@ -151,13 +159,15 @@ export default function AdminPage() {
               ? ("attendant" as const)
               : u.cargo === "mecanico"
                 ? ("mechanic" as const)
-                : (u.cargo as any), // Keep custom role name
+                : (u.cargo as any),
         queues: u.queues || [],
       }));
       setUsers(transformedUsers);
       setStats(statsData);
       setQueueCategories(categoriesData);
       setRoles(rolesData);
+      setServices(servicesData);
+      setFilteredServices(servicesData);
     } catch (err) {
       console.error("Erro ao carregar dados:", err);
     } finally {
@@ -168,6 +178,30 @@ export default function AdminPage() {
   const handleLogout = () => {
     logout();
     router.push("/");
+  };
+
+  useEffect(() => {
+    if (serviceSearchTerm) {
+      const filtered = services.filter(
+        (service) =>
+          service.service_number.toString().includes(serviceSearchTerm) ||
+          service.customer_name.toLowerCase().includes(serviceSearchTerm.toLowerCase()) ||
+          service.description.toLowerCase().includes(serviceSearchTerm.toLowerCase()) ||
+          (service.brand && service.brand.toLowerCase().includes(serviceSearchTerm.toLowerCase())) ||
+          (service.model && service.model.toLowerCase().includes(serviceSearchTerm.toLowerCase()))
+      );
+      setFilteredServices(filtered);
+    } else {
+      setFilteredServices(services);
+    }
+  }, [serviceSearchTerm, services]);
+
+  const handleOpenServiceView = (service: Service) => {
+    setViewingService(service);
+  };
+
+  const handleCloseServiceView = () => {
+    setViewingService(null);
   };
 
   const handleCreateUser = async () => {
@@ -426,6 +460,9 @@ export default function AdminPage() {
               <p className="text-xs text-slate-600">Gestão e Desempenho</p>
             </div>
           </div>
+          <div className="flex items-center gap-3">
+            <GlobalSearch />
+          </div>
           <Button variant="outline" size="icon" onClick={handleLogout}>
             <LogOut className="w-4 h-4" />
           </Button>
@@ -434,8 +471,9 @@ export default function AdminPage() {
 
       <main className="container mx-auto px-4 py-6 space-y-6">
         <Tabs defaultValue="performance" className="w-full">
-          <TabsList className="grid w-full grid-cols-4">
+          <TabsList className="grid w-full grid-cols-5">
             <TabsTrigger value="performance">Desempenho</TabsTrigger>
+            <TabsTrigger value="services">Ordens de Serviço</TabsTrigger>
             <TabsTrigger value="users">Usuários</TabsTrigger>
             <TabsTrigger value="queues">Filas</TabsTrigger>
             <TabsTrigger value="roles">Funções</TabsTrigger>
@@ -509,6 +547,141 @@ export default function AdminPage() {
                 </CardContent>
               </Card>
             </div>
+          </TabsContent>
+
+          <TabsContent value="services" className="space-y-6 mt-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>Ordens de Serviço</CardTitle>
+                <CardDescription>Visualize todas as ordens de serviço</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="mb-4">
+                  <Input
+                    placeholder="Buscar por número, cliente ou descrição..."
+                    value={serviceSearchTerm}
+                    onChange={(e) => setServiceSearchTerm(e.target.value)}
+                    className="max-w-md"
+                  />
+                </div>
+                {filteredServices.length === 0 ? (
+                  <div className="text-center py-12">
+                    <List className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+                    <p className="text-slate-500">
+                      {serviceSearchTerm ? "Nenhum serviço encontrado" : "Nenhum serviço cadastrado"}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {filteredServices.map((service) => (
+                      <Card
+                        key={service.id}
+                        className="hover:shadow-md transition-shadow cursor-pointer"
+                        onClick={() => handleOpenServiceView(service)}
+                      >
+                        <CardContent className="p-4">
+                          <div className="flex items-start justify-between gap-4">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-baseline gap-2 flex-wrap">
+                                <span className="font-mono text-slate-400">
+                                  #{service.service_number}
+                                </span>
+                                <h3 className="font-semibold text-slate-900 shrink-0">
+                                  {service.customer_name}
+                                </h3>
+                              </div>
+                              <p className="text-sm text-slate-500 truncate">
+                                {service.description}
+                              </p>
+                              <div className="flex items-center gap-2 mt-1">
+                                {service.queue && (
+                                  <span className="inline-flex items-center px-2 py-1 rounded-md bg-slate-100 text-slate-700 text-xs">
+                                    {service.queue}
+                                  </span>
+                                )}
+                                {service.brand && service.model && (
+                                  <span className="text-xs text-slate-400">
+                                    {service.brand} {service.model}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <Badge
+                              className={
+                                service.status === "completed"
+                                  ? "bg-green-100 text-green-800"
+                                  : service.status === "in-progress"
+                                  ? "bg-blue-100 text-blue-800"
+                                  : "bg-yellow-100 text-yellow-800"
+                              }
+                            >
+                              {service.status === "completed"
+                                ? "Concluído"
+                                : service.status === "in-progress"
+                                ? "Em andamento"
+                                : "Pendente"}
+                            </Badge>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Dialog open={!!viewingService} onOpenChange={handleCloseServiceView}>
+              <DialogContent className="max-w-lg w-[calc(100vw-2rem)]">
+                <DialogHeader>
+                  <DialogTitle>Ordem de Serviço - N. {viewingService?.service_number}</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-4 mt-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-sm font-medium text-slate-500">Cliente</p>
+                      <p className="text-base">{viewingService?.customer_name}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-slate-500">Telefone</p>
+                      <p className="text-base">{viewingService?.customer_phone}</p>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-sm font-medium text-slate-500">Marca/Modelo</p>
+                      <p className="text-base">{viewingService?.brand} {viewingService?.model}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-slate-500">Status</p>
+                      <span className={`inline-flex px-2 py-1 rounded-md text-xs ${
+                        viewingService?.status === "completed" ? "bg-green-100 text-green-800" :
+                        viewingService?.status === "in-progress" ? "bg-blue-100 text-blue-800" :
+                        "bg-yellow-100 text-yellow-800"
+                      }`}>
+                        {viewingService?.status === "completed" ? "Concluído" :
+                         viewingService?.status === "in-progress" ? "Em andamento" : "Pendente"}
+                      </span>
+                    </div>
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-slate-500">Descrição</p>
+                    <p className="text-base">{viewingService?.description}</p>
+                  </div>
+                  {viewingService?.queue && (
+                    <div>
+                      <p className="text-sm font-medium text-slate-500">Fila</p>
+                      <p className="text-base">{viewingService?.queue}</p>
+                    </div>
+                  )}
+                  {viewingService?.professional && (
+                    <div>
+                      <p className="text-sm font-medium text-slate-500">Profissional</p>
+                      <p className="text-base">{viewingService?.professional}</p>
+                    </div>
+                  )}
+                </div>
+              </DialogContent>
+            </Dialog>
           </TabsContent>
 
           <TabsContent value="users" className="space-y-6 mt-6">

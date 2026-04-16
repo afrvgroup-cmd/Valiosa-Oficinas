@@ -1,10 +1,9 @@
 "use client";
 
-import type React from "react";
-
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import React, { useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { getAuthState, logout, getCurrentUser } from "@/lib/auth";
+import { GlobalSearch } from "@/components/global-search";
 import {
   getAllServices,
   createService as apiCreateService,
@@ -62,6 +61,7 @@ import {
   SendHorizontal,
   Paperclip,
   Smile,
+  Hash,
 } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -70,9 +70,12 @@ export default function AttendantPage() {
   const [services, setServices] = useState<Service[]>([]);
   const [filteredServices, setFilteredServices] = useState<Service[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
+  const [searchByNumber, setSearchByNumber] = useState("");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const serviceIdRef = React.useRef<HTMLDivElement | null>(null);
 
   // Customers list
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -121,7 +124,7 @@ export default function AttendantPage() {
   const [clientFormState, setClientFormState] = useState("");
   const [clientFormZip, setClientFormZip] = useState("");
 
-  useEffect(() => {
+useEffect(() => {
     const { user } = getAuthState();
     if (!user) {
       router.push("/");
@@ -133,6 +136,40 @@ export default function AttendantPage() {
     loadQueueCategories();
     loadUsers();
   }, []);
+
+// Carregar OS específica via API se não estiver na lista local
+const loadServiceById = async (serviceId: string) => {
+    try {
+      const { getServiceByIdNoFilter } = await import("@/lib/api-services");
+      const service = await getServiceByIdNoFilter(serviceId);
+      if (service) {
+        setEditingService(service);
+        return true;
+      }
+    } catch (err) {
+      console.error("Erro ao carregar OS:", err);
+    }
+    return false;
+  };
+
+  const handleCloseEdit = () => {
+    setEditingService(null);
+    router.replace("/attendant");
+  };
+
+  useEffect(() => {
+    const serviceId = searchParams.get("serviceId");
+    
+    if (!serviceId) return;
+    
+    const localService = services.find((s) => s.id.toString() === serviceId);
+    if (localService) {
+      setEditingService(localService);
+      return;
+    }
+    
+    loadServiceById(serviceId);
+  }, [searchParams, services]);
 
   const loadCustomers = async () => {
     try {
@@ -187,21 +224,24 @@ export default function AttendantPage() {
     if (searchTerm) {
       const filtered = services.filter(
         (service) =>
-          service.customer_name
-            .toLowerCase()
-            .includes(searchTerm.toLowerCase()) ||
-          service.description
-            .toLowerCase()
-            .includes(searchTerm.toLowerCase()) ||
-          service.model.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          (service.queue &&
-            service.queue.toLowerCase().includes(searchTerm.toLowerCase())),
+          (searchTerm &&
+            (service.customer_name
+              .toLowerCase()
+              .includes(searchTerm.toLowerCase()) ||
+            service.description
+              .toLowerCase()
+              .includes(searchTerm.toLowerCase()) ||
+            service.model.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            (service.queue &&
+              service.queue.toLowerCase().includes(searchTerm.toLowerCase())))) ||
+          (searchByNumber &&
+            service.service_number.toString() === searchByNumber)
       );
       setFilteredServices(filtered);
     } else {
       setFilteredServices(services);
     }
-  }, [searchTerm, services]);
+  }, [searchTerm, searchByNumber, services]);
 
   const loadServices = async () => {
     try {
@@ -227,7 +267,9 @@ export default function AttendantPage() {
     const selectedCustomer = customers.find(
       (c) => c.id.toString() === selectedCustomerId,
     );
-    if (!selectedCustomer) return;
+    if (!selectedCustomer) {
+      return;
+    }
 
     try {
       await apiCreateService({
@@ -237,19 +279,21 @@ export default function AttendantPage() {
         model,
         description,
         priority,
-        queue: queue || " ",
-        professional: professional || " ",
+        queueId: queue || undefined,
+        professionalId: professional || undefined,
         createdBy: user.name,
         obs: "",
       });
 
       setSelectedCustomerId("");
+      setCustomerSearchTerm("");
       setBrand("");
       setModel("");
       setDescription("");
       setPriority("medium");
       setQueue("");
       setProfessional("");
+      setFilteredCustomers(customers);
       setIsDialogOpen(false);
       setSuccessMessage("Serviço cadastrado com sucesso!");
       setTimeout(() => setSuccessMessage(""), 3000);
@@ -260,16 +304,17 @@ export default function AttendantPage() {
   };
 
   useEffect(() => {
-    if (!selectedCustomerId) {
-      const timeout = setTimeout(() => {
-        if (customerSearchTerm.length >= 2) {
-          searchCustomers(customerSearchTerm).then(setFilteredCustomers);
-        } else if (customerSearchTerm.length === 0) {
-          setFilteredCustomers(customers);
-        }
-      }, 300);
-      return () => clearTimeout(timeout);
-    }
+    // Não executar busca se há um cliente selecionado
+    if (selectedCustomerId) return;
+
+    const timeout = setTimeout(() => {
+      if (customerSearchTerm.length >= 2) {
+        searchCustomers(customerSearchTerm).then(setFilteredCustomers);
+      } else if (customerSearchTerm.length === 0) {
+        setFilteredCustomers(customers);
+      }
+    }, 300);
+    return () => clearTimeout(timeout);
   }, [customerSearchTerm, customers, selectedCustomerId]);
 
   const handleCreateClient = async (e: React.FormEvent) => {
@@ -299,6 +344,7 @@ export default function AttendantPage() {
       setClientFormState("");
       setClientFormZip("");
       setIsClientDialogOpen(false);
+      setCustomerSearchTerm("");
     } catch (err) {
       console.error("Erro ao criar cliente:", err);
     }
@@ -355,7 +401,7 @@ export default function AttendantPage() {
 
       setSuccessMessage("Serviço atualizado com sucesso!");
       setTimeout(() => setSuccessMessage(""), 3000);
-      setEditingService(null);
+      handleCloseEdit();
       setEditObservations("");
       loadServices();
     } catch (err) {
@@ -445,6 +491,9 @@ export default function AttendantPage() {
                 Gerencie suas ordens de serviços
               </p>
             </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <GlobalSearch />
           </div>
           <Button
             variant="outline"
@@ -594,8 +643,12 @@ export default function AttendantPage() {
                                         setSelectedCustomerId(
                                           customer.id.toString(),
                                         );
-                                        setCustomerSearchTerm(customer.name); // <-- só o nome
+                                        setCustomerSearchTerm(customer.name);
                                         setFilteredCustomers([]);
+                                        // Adicionar cliente ao array local se não existir
+                                        if (!customers.find(c => c.id.toString() === customer.id.toString())) {
+                                          setCustomers([...customers, customer]);
+                                        }
                                       }}
                                     >
                                       <div className="font-medium">
@@ -935,13 +988,22 @@ export default function AttendantPage() {
             </div>
           </CardHeader>
           <CardContent>
-            <div className="mb-4">
-              <div className="relative">
+            <div className="flex gap-2 mb-4">
+              <div className="relative flex-1">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-slate-400" />
                 <Input
                   placeholder="Buscar por cliente, marca ou modelo..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-10"
+                />
+              </div>
+              <div className="relative w-32">
+                <Hash className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-slate-400" />
+                <Input
+                  placeholder="Nº OS"
+                  value={searchByNumber}
+                  onChange={(e) => setSearchByNumber(e.target.value)}
                   className="pl-10"
                 />
               </div>
@@ -951,7 +1013,7 @@ export default function AttendantPage() {
               <div className="text-center py-12">
                 <ClipboardList className="w-12 h-12 text-slate-300 mx-auto mb-3" />
                 <p className="text-slate-500">
-                  {searchTerm
+                  {searchTerm || searchByNumber
                     ? "Nenhum serviço encontrado"
                     : "Nenhum serviço cadastrado ainda"}
                 </p>
@@ -961,6 +1023,7 @@ export default function AttendantPage() {
                 {filteredServices.map((service) => (
                   <Card
                     key={service.id}
+                    id={`service-${service.id}`}
                     className="hover:shadow-md transition-shadow cursor-pointer"
                     onClick={() => handleOpenEdit(service)}
                   >
@@ -1019,7 +1082,7 @@ export default function AttendantPage() {
 
         <Dialog
           open={!!editingService}
-          onOpenChange={(open) => !open && setEditingService(null)}
+          onOpenChange={(open) => !open && handleCloseEdit()}
         >
           <DialogContent className="max-w-lg w-[calc(100vw-2rem)] overflow-hidden">
             <DialogHeader>
@@ -1213,14 +1276,14 @@ export default function AttendantPage() {
               <div className="flex gap-3 pt-4">
                 <Button
                   variant="outline"
-                  // onClick={() => setEditingService(null)}
+                  onClick={() => handleCloseEdit()}
                   className="flex-1"
                 >
                   Cancelar
                 </Button>
                 <Button
                   variant="outline"
-                  onClick={() => setEditingService(null)}
+                  onClick={() => handleCloseEdit()}
                   className="flex-1"
                 >
                   Encerrar Serviço

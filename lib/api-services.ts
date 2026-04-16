@@ -68,6 +68,29 @@ export async function getAllServices(): Promise<Service[]> {
   return result.data || [];
 }
 
+export async function searchServiceByNumber(serviceNumber: string): Promise<Service | null> {
+  if (!serviceNumber.trim()) return null;
+  try {
+    const result = await fetchWithAuth(`/services/search?service_number=${serviceNumber}`);
+    return result.data || null;
+  } catch {
+    return null;
+  }
+}
+
+export async function getServiceByIdNoFilter(id: string): Promise<Service | null> {
+  try {
+    const response = await fetchWithAuth(`/services/by-id/${id}`);
+    if (response?.data) {
+      return response.data;
+    }
+    return null;
+  } catch (err) {
+    console.error("getServiceByIdNoFilter error:", err);
+    return null;
+  }
+}
+
 export async function getServiceStats(): Promise<ServiceStats> {
   const result = await fetchWithAuth("/services/stats");
   return result.data;
@@ -81,8 +104,8 @@ export async function createService(service: {
   obs: string;
   description: string;
   priority: ServicePriority;
-  queue: string;
-  professional: string;
+  queueId?: string;
+  professionalId?: string;
   createdBy: string;
 }): Promise<Service> {
   const result = await fetchWithAuth("/services", {

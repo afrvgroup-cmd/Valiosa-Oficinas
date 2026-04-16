@@ -19,6 +19,7 @@ export interface QueueCategory {
   id: number;
   name: string;
   color: string;
+  description?: string;
 }
 
 async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
