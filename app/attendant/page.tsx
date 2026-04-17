@@ -110,6 +110,7 @@ export default function AttendantPage() {
   const [editStatus, setEditStatus] = useState<Service["status"]>("pending");
   const [editQueue, setEditQueue] = useState("");
   const [editProfessional, setEditProfessional] = useState("");
+  const [editAvailableProfessionals, setEditAvailableProfessionals] = useState<User[]>([]);
   const [editObservations, setEditObservations] = useState("");
   const [serviceHistory, setServiceHistory] = useState<any[]>([]);
 
@@ -219,6 +220,22 @@ const loadServiceById = async (serviceId: string) => {
       }
     }
   }, [queue, users, queueCategories]);
+
+  useEffect(() => {
+    if (users.length > 0) {
+      if (editQueue) {
+        const queueObj = queueCategories.find((q) => q.id.toString() === editQueue);
+        if (queueObj) {
+          const filtered = users.filter((u) => {
+            return u.queues?.some((q) => q.id === queueObj.id);
+          });
+          setEditAvailableProfessionals(filtered);
+        }
+      } else {
+        setEditAvailableProfessionals(users);
+      }
+    }
+  }, [editQueue, users, queueCategories]);
 
   useEffect(() => {
     if (searchTerm || searchByNumber) {
@@ -361,6 +378,19 @@ const loadServiceById = async (serviceId: string) => {
     setEditStatus(service.status ?? "pending");
     setEditQueue((service as any).queue_id?.toString() || "");
     setEditProfessional((service as any).assigned_to?.toString() || "");
+    
+    // Set available professionals based on current queue
+    const queueId = (service as any).queue_id?.toString();
+    if (queueId && users.length > 0 && queueCategories.length > 0) {
+      const queueObj = queueCategories.find((q) => q.id.toString() === queueId);
+      if (queueObj) {
+        const filtered = users.filter((u) => u.queues?.some((q) => q.id === queueObj.id));
+        setEditAvailableProfessionals(filtered);
+      }
+    } else {
+      setEditAvailableProfessionals(users);
+    }
+    
     setEditObservations("");
     
     // Load history for this service
@@ -1121,7 +1151,7 @@ const loadServiceById = async (serviceId: string) => {
                       <SelectValue placeholder="Selecione o profissional" />
                     </SelectTrigger>
                     <SelectContent>
-                      {users.map((user) => (
+                      {editAvailableProfessionals.map((user) => (
                         <SelectItem key={user.id} value={user.id.toString()}>
                           {user.nome_completo}
                         </SelectItem>
