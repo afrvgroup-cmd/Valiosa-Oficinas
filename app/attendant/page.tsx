@@ -221,7 +221,7 @@ const loadServiceById = async (serviceId: string) => {
   }, [queue, users, queueCategories]);
 
   useEffect(() => {
-    if (searchTerm) {
+    if (searchTerm || searchByNumber) {
       const filtered = services.filter(
         (service) =>
           (searchTerm &&
@@ -1001,7 +1001,7 @@ const loadServiceById = async (serviceId: string) => {
               <div className="relative w-32">
                 <Hash className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-slate-400" />
                 <Input
-                  placeholder="Nº OS"
+                  placeholder="N. OS"
                   value={searchByNumber}
                   onChange={(e) => setSearchByNumber(e.target.value)}
                   className="pl-10"
